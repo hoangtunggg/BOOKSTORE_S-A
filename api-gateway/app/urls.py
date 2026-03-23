@@ -19,7 +19,7 @@ urlpatterns = [
     # Admin
     path('', home, name='home'),
     path('books/', book_list, name='book_list'),
-    path('clothes/', admin_clothe_list, name='admin_clothe_list'),
+    path('admin/clothes/', admin_clothe_list, name='admin_clothe_list'),
     path('customers/', customer_list, name='customer_list'),
     path('cart/<int:customer_id>/', view_cart, name='view_cart'),
     path('orders/', admin_order_list, name='admin_order_list'),
@@ -32,6 +32,7 @@ urlpatterns = [
     path('reviews/', admin_review_list, name='admin_review_list'),
     # Storefront
     path('store/', store_home, name='store_home'),
+    path('clothes/', store_clothes, name='store_clothes'),
     path('store/clothes/', store_clothes, name='store_clothes'),
     path('store/clothes/<int:clothe_id>/', store_clothe_detail, name='store_clothe_detail'),
     path('store/login/', store_login, name='store_login'),
