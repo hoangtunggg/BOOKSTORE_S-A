@@ -5,20 +5,23 @@ from django.http import JsonResponse
 import requests
 import os
 from math import ceil
+import jwt
+import datetime
 
-BOOK_SERVICE_URL = "http://book-service:8000"
-CART_SERVICE_URL = "http://cart-service:8000"
-CUSTOMER_SERVICE_URL = "http://customer-service:8000"
-ORDER_SERVICE_URL = "http://order-service:8000"
-STAFF_SERVICE_URL = "http://staff-service:8000"
-MANAGER_SERVICE_URL = "http://manager-service:8000"
-CATALOG_SERVICE_URL = "http://catalog-service:8000"
-PAY_SERVICE_URL = "http://pay-service:8000"
-SHIP_SERVICE_URL = "http://ship-service:8000"
-COMMENT_RATE_SERVICE_URL = "http://comment-rate-service:8000"
-RECOMMENDER_SERVICE_URL = "http://recommender-ai-service:8000"
-AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://auth-service:8000")
-CLOTHE_SERVICE_URL = "http://clothe-service:8000"
+# Service URLs - use environment variables for flexibility between Docker and local development
+BOOK_SERVICE_URL = os.environ.get("BOOK_SERVICE_URL", "http://localhost:8002")
+CART_SERVICE_URL = os.environ.get("CART_SERVICE_URL", "http://localhost:8003")
+CUSTOMER_SERVICE_URL = os.environ.get("CUSTOMER_SERVICE_URL", "http://localhost:8001")
+ORDER_SERVICE_URL = os.environ.get("ORDER_SERVICE_URL", "http://localhost:8004")
+STAFF_SERVICE_URL = os.environ.get("STAFF_SERVICE_URL", "http://localhost:8005")
+MANAGER_SERVICE_URL = os.environ.get("MANAGER_SERVICE_URL", "http://localhost:8006")
+CATALOG_SERVICE_URL = os.environ.get("CATALOG_SERVICE_URL", "http://localhost:8007")
+PAY_SERVICE_URL = os.environ.get("PAY_SERVICE_URL", "http://localhost:8008")
+SHIP_SERVICE_URL = os.environ.get("SHIP_SERVICE_URL", "http://localhost:8009")
+COMMENT_RATE_SERVICE_URL = os.environ.get("COMMENT_RATE_SERVICE_URL", "http://localhost:8010")
+RECOMMENDER_SERVICE_URL = os.environ.get("RECOMMENDER_SERVICE_URL", "http://localhost:8011")
+AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://localhost:8012")
+CLOTHE_SERVICE_URL = os.environ.get("CLOTHE_SERVICE_URL", "http://localhost:8013")
 
 
 # ── HELPERS ──────────────────────────────────────────────────
@@ -34,9 +37,50 @@ def _get_store_customer(request):
     return None
 
 
-def _get_cart_id(customer_id):
+def _get_jwt_token(request):
+    """Extract JWT token from request session or headers"""
+    token = request.session.get("access_token")
+    if token:
+        return token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1]
+    return None
+
+
+def _get_auth_headers(request):
+    """Get authentication headers for service-to-service requests"""
+    token = _get_jwt_token(request)
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+def _generate_fallback_jwt_token(customer_id, customer_name, email=""):
+    """Generate JWT token when auth service is not available"""
     try:
-        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3)
+        secret = os.environ.get("JWT_SECRET_KEY", "bookstore-jwt-secret")
+        payload = {
+            'user_id': customer_id,
+            'sub': str(customer_id),
+            'role': 'customer',
+            'email': email,
+            'name': customer_name,
+            'iss': 'bookstore-auth-service',
+            'aud': 'bookstore-clients',
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24),
+            'iat': datetime.datetime.utcnow()
+        }
+        token = jwt.encode(payload, secret, algorithm='HS256')
+        return token
+    except Exception:
+        return None
+
+
+def _get_cart_id(customer_id, request=None):
+    headers = _get_auth_headers(request) if request else {}
+    try:
+        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3, headers=headers)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, dict) and "cart_id" in data:
@@ -47,6 +91,7 @@ def _get_cart_id(customer_id):
             f"{CART_SERVICE_URL}/carts/",
             json={"customer_id": customer_id},
             timeout=3,
+            headers=headers,
         )
         if r_create.status_code in (200, 201):
             created = r_create.json()
@@ -54,7 +99,7 @@ def _get_cart_id(customer_id):
                 return created["id"]
 
         # Final retry to handle race conditions.
-        r_retry = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3)
+        r_retry = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3, headers=headers)
         if r_retry.status_code == 200:
             data = r_retry.json()
             if isinstance(data, dict) and "cart_id" in data:
@@ -62,6 +107,20 @@ def _get_cart_id(customer_id):
     except Exception:
         pass
     return None
+
+
+def _get_cart_count(customer_id, request=None):
+    """Get total number of items in cart for displaying badge"""
+    headers = _get_auth_headers(request) if request else {}
+    try:
+        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3, headers=headers)
+        if r.status_code == 200:
+            data = r.json()
+            items = data.get("items", [])
+            return sum(item.get("quantity", 1) for item in items)
+    except Exception:
+        pass
+    return 0
 
 
 # ── ADMIN VIEWS ──────────────────────────────────────────────
@@ -178,7 +237,8 @@ def view_cart(request, customer_id):
             "quantity": request.POST.get("quantity"),
         }
         try:
-            r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json=data, timeout=3)
+            headers = _get_auth_headers(request)
+            r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json=data, timeout=3, headers=headers)
             if r.status_code in (200, 201):
                 messages.success(request, "Thêm vào giỏ hàng thành công!")
             else:
@@ -187,7 +247,8 @@ def view_cart(request, customer_id):
             messages.error(request, f"Không kết nối được cart-service: {e}")
         return redirect("view_cart", customer_id=customer_id)
     try:
-        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3)
+        headers = _get_auth_headers(request)
+        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer_id}/", timeout=3, headers=headers)
         data = r.json()
         if isinstance(data, dict) and "cart_id" in data:
             cart_id = data["cart_id"]
@@ -317,7 +378,9 @@ def store_home(request):
     current_querystring = request.get_full_path()
 
     customer = _get_store_customer(request)
+    cart_count = 0
     if customer:
+        cart_count = _get_cart_count(customer["id"], request)
         try:
             r = requests.get(f"{RECOMMENDER_SERVICE_URL}/recommendations/{customer['id']}/", timeout=5)
             if r.status_code == 200:
@@ -327,6 +390,7 @@ def store_home(request):
     return render(request, "store_home.html", {
         "books": paginated_books,
         "customer": customer,
+        "cart_count": cart_count,
         "recommendations": recommendations,
         "authors": all_authors,
         "total_books": len(books),
@@ -368,6 +432,7 @@ def store_login(request):
                     request.session["customer_name"] = found["name"]
 
                     # Central auth-service token issuance.
+                    access_token = None
                     try:
                         r_auth = requests.post(
                             f"{AUTH_SERVICE_URL}/auth/login/",
@@ -375,9 +440,20 @@ def store_login(request):
                             timeout=3,
                         )
                         if r_auth.status_code == 200:
-                            request.session["access_token"] = r_auth.json().get("access", "")
+                            access_token = r_auth.json().get("access", "")
                     except Exception:
                         pass
+
+                    # Fallback: generate JWT token when auth service fails or returns error
+                    if not access_token:
+                        access_token = _generate_fallback_jwt_token(
+                            found["id"],
+                            found["name"],
+                            email
+                        )
+
+                    if access_token:
+                        request.session["access_token"] = access_token
 
                     messages.success(request, f"Xin chào, {found['name']}!")
                     return redirect("store_home")
@@ -409,6 +485,7 @@ def store_register(request):
                 customer = r.json()
 
                 # Sync identity to central auth-service.
+                access_token = None
                 try:
                     r_auth = requests.post(
                         f"{AUTH_SERVICE_URL}/auth/register/",
@@ -420,9 +497,20 @@ def store_register(request):
                         timeout=3,
                     )
                     if r_auth.status_code in (200, 201):
-                        request.session["access_token"] = r_auth.json().get("access", "")
+                        access_token = r_auth.json().get("access", "")
                 except Exception:
                     pass
+
+                # Fallback: generate JWT token when auth service fails
+                if not access_token:
+                    access_token = _generate_fallback_jwt_token(
+                        customer["id"],
+                        customer["name"],
+                        data["email"]
+                    )
+
+                if access_token:
+                    request.session["access_token"] = access_token
 
                 # Log them in automatically
                 request.session["customer_id"] = customer["id"]
@@ -476,9 +564,11 @@ def store_profile(request):
     except Exception as e:
         messages.error(request, f"Lỗi lấy thông tin: {e}")
 
+    cart_count = _get_cart_count(customer['id'], request)
     return render(request, "store_profile.html", {
         "customer": full_info,
         "jobs": jobs,
+        "cart_count": cart_count,
     })
 
 
@@ -497,7 +587,8 @@ def store_cart(request):
     cart_id = None
     error = None
     try:
-        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer['id']}/", timeout=3)
+        headers = _get_auth_headers(request)
+        r = requests.get(f"{CART_SERVICE_URL}/carts/{customer['id']}/", timeout=3, headers=headers)
         data = r.json()
         if isinstance(data, dict) and "cart_id" in data:
             cart_id = data["cart_id"]
@@ -540,10 +631,12 @@ def store_cart(request):
             subtotal = float(book.get("price", 0)) * item["quantity"]
             total += subtotal
             enriched.append({**item, "book": book, "subtotal": subtotal, "is_clothe": False})
-            
+
+    cart_count = sum(item["quantity"] for item in enriched)
     return render(request, "store_cart.html", {
         "items": enriched, "cart_id": cart_id,
         "total": total, "error": error, "customer": customer,
+        "cart_count": cart_count,
     })
 
 
@@ -569,7 +662,7 @@ def store_add_to_cart(request):
         quantity = 1
     quantity = max(1, min(quantity, 99))
 
-    cart_id = _get_cart_id(customer["id"])
+    cart_id = _get_cart_id(customer["id"], request)
     if not cart_id:
         messages.error(request, "Không tìm thấy giỏ hàng.")
         return redirect(next_url)
@@ -588,13 +681,13 @@ def store_add_to_cart(request):
         except Exception as e:
             messages.error(request, f"Lỗi kết nối kiểm tra tồn kho: {e}")
             return redirect(next_url)
-            
         try:
+            headers = _get_auth_headers(request)
             r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json={
                 "cart": cart_id,
                 "book_id": int(book_id),
                 "quantity": quantity,
-            }, timeout=3)
+            }, timeout=3, headers=headers)
             if r.status_code in (200, 201):
                 messages.success(request, "Đã thêm Sách vào giỏ hàng!")
             else:
@@ -616,13 +709,13 @@ def store_add_to_cart(request):
         except Exception as e:
             messages.error(request, f"Lỗi kết nối kiểm tra tồn kho: {e}")
             return redirect(next_url)
-            
         try:
+            headers = _get_auth_headers(request)
             r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json={
                 "cart": cart_id,
                 "book_id": int(clothe_id) + 1000000,
                 "quantity": quantity,
-            }, timeout=3)
+            }, timeout=3, headers=headers)
             if r.status_code in (200, 201):
                 messages.success(request, "Đã thêm Quần áo vào giỏ hàng!")
             else:
@@ -632,93 +725,6 @@ def store_add_to_cart(request):
     else:
         messages.error(request, "Dữ liệu sản phẩm không hợp lệ.")
 
-    return redirect(next_url)
-
-    if book_id:
-        try:
-            r_book = requests.get(f"{BOOK_SERVICE_URL}/books/{int(book_id)}/", timeout=3)
-            if r_book.status_code == 200:
-                book = r_book.json()
-                if int(book.get("stock", 0) or 0) <= 0:
-                    messages.error(request, f"Sách '{book.get('title', '')}' đã hết hàng.")
-                    return redirect(next_url)
-            else:
-                messages.error(request, "Không thể kiểm tra tồn kho hiện tại.")
-                return redirect(next_url)
-        except Exception as e:
-            messages.error(request, f"Lỗi kết nối kiểm tra tồn kho: {e}")
-            return redirect(next_url)
-            
-        try:
-            r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json={
-                "cart": cart_id,
-                "book_id": int(book_id),
-                "quantity": quantity,
-            }, timeout=3)
-            if r.status_code in (200, 201):
-                messages.success(request, "Đã thêm Sách vào giỏ hàng!")
-            else:
-                messages.error(request, f"Lỗi: {r.text}")
-        except Exception as e:
-            messages.error(request, f"Lỗi kết nối: {e}")
-            
-    elif clothe_id:
-        try:
-            r_clothe = requests.get(f"{CLOTHE_SERVICE_URL}/clothes/{int(clothe_id)}/", timeout=3)
-            if r_clothe.status_code == 200:
-                clothe = r_clothe.json()
-                if int(clothe.get("stock", 0) or 0) <= 0:
-                    messages.error(request, f"Sản phẩm '{clothe.get('name', '')}' đã hết hàng.")
-                    return redirect(next_url)
-            else:
-                messages.error(request, "Không thể kiểm tra tồn kho hiện tại.")
-                return redirect(next_url)
-        except Exception as e:
-            messages.error(request, f"Lỗi kết nối kiểm tra tồn kho: {e}")
-            return redirect(next_url)
-            
-        try:
-            r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json={
-                "cart": cart_id,
-                "book_id": int(clothe_id) + 1000000,
-                "quantity": quantity,
-            }, timeout=3)
-            if r.status_code in (200, 201):
-                messages.success(request, "Đã thêm Quần áo vào giỏ hàng!")
-            else:
-                messages.error(request, f"Lỗi: {r.text}")
-        except Exception as e:
-            messages.error(request, f"Lỗi kết nối: {e}")
-
-    return redirect(next_url)
-
-    # Basic stock guard before writing cart item.
-    try:
-        r_book = requests.get(f"{BOOK_SERVICE_URL}/books/{int(book_id)}/", timeout=3)
-        if r_book.status_code == 200:
-            book = r_book.json()
-            if int(book.get("stock", 0) or 0) <= 0:
-                messages.error(request, f"Sách '{book.get('title', '')}' đã hết hàng.")
-                return redirect(next_url)
-        else:
-            messages.error(request, "Không thể kiểm tra tồn kho hiện tại.")
-            return redirect(next_url)
-    except Exception as e:
-        messages.error(request, f"Lỗi kết nối kiểm tra tồn kho: {e}")
-        return redirect(next_url)
-
-    try:
-        r = requests.post(f"{CART_SERVICE_URL}/cart-items/", json={
-            "cart": cart_id,
-            "book_id": int(book_id),
-            "quantity": quantity,
-        }, timeout=3)
-        if r.status_code in (200, 201):
-            messages.success(request, "Đã thêm vào giỏ hàng!")
-        else:
-            messages.error(request, f"Lỗi: {r.text}")
-    except Exception as e:
-        messages.error(request, f"Lỗi kết nối: {e}")
     return redirect(next_url)
 
 
@@ -739,10 +745,13 @@ def store_book_detail(request, book_id):
             reviews_data = r.json()
     except Exception:
         pass
-    
+
+    customer = _get_store_customer(request)
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
     return render(request, "store_book_detail.html", {
         "book": book,
-        "customer": _get_store_customer(request),
+        "customer": customer,
+        "cart_count": cart_count,
         "reviews": reviews_data.get("reviews", []),
         "average_rating": reviews_data.get("average_rating", 0),
         "total_reviews": reviews_data.get("total_reviews", 0),
@@ -753,10 +762,11 @@ def store_remove_from_cart(request, book_id):
     customer = _get_store_customer(request)
     if not customer:
         return redirect("store_login")
-    cart_id = _get_cart_id(customer["id"])
+    cart_id = _get_cart_id(customer["id"], request)
     if cart_id:
         try:
-            requests.delete(f"{CART_SERVICE_URL}/cart-items/{cart_id}/{book_id}/", timeout=3)
+            headers = _get_auth_headers(request)
+            requests.delete(f"{CART_SERVICE_URL}/cart-items/{cart_id}/{book_id}/", timeout=3, headers=headers)
             messages.success(request, "Đã xóa sản phẩm khỏi giỏ hàng.")
         except Exception as e:
             messages.error(request, f"Lỗi: {e}")
@@ -773,7 +783,8 @@ def store_checkout(request):
 
     # 1. Get cart items
     try:
-        r_cart = requests.get(f"{CART_SERVICE_URL}/carts/{customer['id']}/", timeout=3)
+        headers = _get_auth_headers(request)
+        r_cart = requests.get(f"{CART_SERVICE_URL}/carts/{customer['id']}/", timeout=3, headers=headers)
         cart_data = r_cart.json()
         raw_items = cart_data.get("items", [])
     except Exception as e:
@@ -791,8 +802,16 @@ def store_checkout(request):
         books_r = requests.get(f"{BOOK_SERVICE_URL}/books/", timeout=3)
         books_map = {b["id"]: b for b in books_r.json()}
         
-        clothes_r = requests.get(f"{CLOTHE_SERVICE_URL}/clothes/", timeout=3)
-        clothes_map = {c["id"]: c for c in clothes_r.json()}
+        # Only fetch clothes if there are clothe items in cart
+        has_clothes = any(ri["book_id"] > 1000000 for ri in raw_items)
+        clothes_map = {}
+        if has_clothes:
+            try:
+                clothes_r = requests.get(f"{CLOTHE_SERVICE_URL}/clothes/", timeout=3)
+                clothes_map = {c["id"]: c for c in clothes_r.json()}
+            except Exception:
+                messages.error(request, "Không thể kết nối đến dịch vụ quần áo.")
+                return redirect("store_cart")
         
         for ri in raw_items:
             actual_id = ri["book_id"]
@@ -899,7 +918,8 @@ def store_checkout(request):
 
             # 5. Clear cart
             try:
-                requests.delete(f"{CART_SERVICE_URL}/carts/{customer['id']}/clear/", timeout=3)
+                headers = _get_auth_headers(request)
+                requests.delete(f"{CART_SERVICE_URL}/carts/{customer['id']}/clear/", timeout=3, headers=headers)
             except Exception:
                 pass
             
@@ -911,7 +931,7 @@ def store_checkout(request):
                         "customer_id": customer["id"],
                         "amount": order_resp.get("grand_total"),
                         "method": "vnpay",
-                    }, timeout=3)
+                    }, timeout=3, headers=headers)
                     if pay_res.status_code == 201:
                         pay_data = pay_res.json()
                         return render(request, "store_vnpay_sim.html", {
@@ -950,7 +970,8 @@ def store_checkout(request):
 
     # 1. Get cart items
     try:
-        r_cart = requests.get(f"{CART_SERVICE_URL}/carts/{customer['id']}/", timeout=3)
+        headers = _get_auth_headers(request)
+        r_cart = requests.get(f"{CART_SERVICE_URL}/carts/{customer['id']}/", timeout=3, headers=headers)
         cart_data = r_cart.json()
         raw_items = cart_data.get("items", [])
     except Exception as e:
@@ -1052,7 +1073,8 @@ def store_checkout(request):
 
             # 5. Clear cart using the new endpoint
             try:
-                requests.delete(f"{CART_SERVICE_URL}/carts/{customer['id']}/clear/", timeout=3)
+                headers = _get_auth_headers(request)
+                requests.delete(f"{CART_SERVICE_URL}/carts/{customer['id']}/clear/", timeout=3, headers=headers)
             except Exception:
                 pass
             
@@ -1065,7 +1087,7 @@ def store_checkout(request):
                         "customer_id": customer["id"],
                         "amount": order_resp.get("grand_total"),
                         "method": "vnpay",
-                    }, timeout=3)
+                    }, timeout=3, headers=headers)
                     if pay_res.status_code == 201:
                         pay_data = pay_res.json()
                         # Redirect to simulation page
@@ -1118,9 +1140,11 @@ def store_orders(request):
             orders = []
     except Exception:
         pass
+    cart_count = _get_cart_count(customer['id'], request)
     return render(request, "store_orders.html", {
         "orders": orders,
         "customer": customer,
+        "cart_count": cart_count,
     })
 
 
@@ -1184,9 +1208,11 @@ def store_order_detail(request, order_id):
                 pass
     except Exception:
         pass
+    cart_count = _get_cart_count(customer['id'], request)
     return render(request, "store_order_detail.html", {
         "order": order,
         "customer": customer,
+        "cart_count": cart_count,
         "shipment": shipment,
         "payment": payment,
     })
@@ -1230,7 +1256,7 @@ def store_payment_simulate(request, order_id):
                                    "order_id": order_id,
                                    "transaction_id": pay["transaction_id"],
                                    "secure_token": "SECRET_PAYMENT_TOKEN" # In real life, this is a calculated signature
-                               }, timeout=3)
+                               }, timeout=3, headers=headers)
                 
                 messages.success(request, "Thanh toán thành công! Hệ thống đang xử lý vận chuyển.")
             else:
@@ -1587,9 +1613,10 @@ def store_clothes(request):
         clothes = r.json()
     except Exception:
         pass
-    
+
     customer = _get_store_customer(request)
-    return render(request, "store_clothes.html", {"clothes": clothes, "customer": customer})
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
+    return render(request, "store_clothes.html", {"clothes": clothes, "customer": customer, "cart_count": cart_count})
 
 def store_clothe_detail(request, clothe_id):
     clothe = None
@@ -1599,4 +1626,6 @@ def store_clothe_detail(request, clothe_id):
             clothe = r.json()
     except Exception:
         pass
-    return render(request, "store_clothe_detail.html", {"clothe": clothe, "customer": _get_store_customer(request)})
+    customer = _get_store_customer(request)
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
+    return render(request, "store_clothe_detail.html", {"clothe": clothe, "customer": customer, "cart_count": cart_count})

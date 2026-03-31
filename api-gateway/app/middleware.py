@@ -3,6 +3,7 @@ import os
 import time
 import hashlib
 
+import jwt
 import requests
 from django.core.cache import cache
 from django.http import JsonResponse
@@ -10,7 +11,10 @@ from django.http import JsonResponse
 
 logger = logging.getLogger("gateway")
 
-AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://auth-service:8000")
+AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://localhost:8012")
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "bookstore-jwt-secret")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+JWT_AUDIENCE = os.environ.get("JWT_AUDIENCE", "bookstore-clients")
 
 PUBLIC_PATH_PREFIXES = (
     "/admin/login/",
@@ -68,6 +72,7 @@ def _validate_with_auth_service(token):
     if cached is not None:
         return cached
 
+    # Try auth service first
     try:
         response = requests.post(
             f"{AUTH_SERVICE_URL}/auth/validate/",
@@ -76,10 +81,34 @@ def _validate_with_auth_service(token):
         )
         if response.status_code == 200:
             claims = response.json().get("claims", {})
-            cache.set(cache_key, claims, timeout=30)
-            return claims
+            if claims:
+                # Normalize claims: auth-service uses 'sub' for user_id
+                if 'sub' in claims and 'user_id' not in claims:
+                    claims['user_id'] = claims['sub']
+                cache.set(cache_key, claims, timeout=30)
+                return claims
     except Exception:
         pass
+
+    # Fallback: decode JWT token directly
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+            audience=JWT_AUDIENCE,
+            options={'verify_aud': True}
+        )
+        # Normalize claims
+        if 'user_id' not in payload and 'sub' in payload:
+            payload['user_id'] = payload['sub']
+        cache.set(cache_key, payload, timeout=30)
+        return payload
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+
     return None
 
 

@@ -303,6 +303,19 @@ services:
       - DB_HOST=postgres-db
       - DB_PORT=5432
       - AUTH_SERVICE_URL=http://auth-service:8000
+      - BOOK_SERVICE_URL=http://book-service:8000
+      - CART_SERVICE_URL=http://cart-service:8000
+      - CUSTOMER_SERVICE_URL=http://customer-service:8000
+      - ORDER_SERVICE_URL=http://order-service:8000
+      - STAFF_SERVICE_URL=http://staff-service:8000
+      - MANAGER_SERVICE_URL=http://manager-service:8000
+      - CATALOG_SERVICE_URL=http://catalog-service:8000
+      - PAY_SERVICE_URL=http://pay-service:8000
+      - SHIP_SERVICE_URL=http://ship-service:8000
+      - COMMENT_RATE_SERVICE_URL=http://comment-rate-service:8000
+      - RECOMMENDER_SERVICE_URL=http://recommender-ai-service:8000
+      - CLOTHE_SERVICE_URL=http://clothe-service:8000
+      - JWT_SECRET_KEY=bookstore-jwt-secret
       - JWT_ISSUER=bookstore-auth-service
       - JWT_AUDIENCE=bookstore-clients
     depends_on:

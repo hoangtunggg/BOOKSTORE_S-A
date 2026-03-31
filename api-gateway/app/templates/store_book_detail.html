@@ -52,6 +52,7 @@
         <form method="post" action="/store/add-to-cart/" class="row g-3">
           {% csrf_token %}
           <input type="hidden" name="book_id" value="{{ book.id }}">
+          <input type="hidden" name="next" value="/store/book/{{ book.id }}/">
           <div class="col-auto">
             <div class="input-group">
               <span class="input-group-text bg-white border-end-0">Số lượng</span>
