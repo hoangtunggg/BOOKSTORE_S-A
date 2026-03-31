@@ -385,6 +385,7 @@ services:
       - PRODUCT_CORE_SERVICE_URL=http://product-core-service:8000
       - INVENTORY_SERVICE_URL=http://inventory-service:8000
       - ELECTRONICS_SERVICE_URL=http://electronics-service:8000
+      - SEARCH_SERVICE_URL=http://search-service:8000
       - JWT_SECRET_KEY=bookstore-jwt-secret
       - JWT_ISSUER=bookstore-auth-service
       - JWT_AUDIENCE=bookstore-clients
@@ -431,6 +432,56 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  search-service:
+    build: ./search-service
+    ports:
+      - "8016:8000"
+    command: sh -c "python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./search-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - PRODUCT_CORE_SERVICE_URL=http://product-core-service:8000
+      - CATALOG_SERVICE_URL=http://catalog-service:8000
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  search-worker:
+    build: ./search-service
+    command: python app/consumer.py
+    volumes:
+      - ./search-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   cart-worker:
     build: ./cart-service
@@ -508,6 +559,30 @@ services:
       - DB_HOST=postgres-db
       - DB_PORT=5432
       - RABBITMQ_HOST=rabbitmq
+      - BOOK_SERVICE_URL=http://book-service:8000
+      - CLOTHE_SERVICE_URL=http://clothe-service:8000
+      - INVENTORY_SERVICE_URL=http://inventory-service:8000
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres-db:
+        condition: service_healthy
+
+  inventory-worker:
+    build: ./inventory-service
+    command: python app/consumer.py
+    volumes:
+      - ./inventory-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=inventory_db
+      - DB_USER=bookstore_user
+      - DB_PASSWORD=bookstore_pass
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - RABBITMQ_HOST=rabbitmq
+      - RESERVATION_EXPIRY_MINUTES=30
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -517,3 +592,4 @@ services:
 volumes:
   mysql_data:
   postgres_data:
+  elasticsearch_data:

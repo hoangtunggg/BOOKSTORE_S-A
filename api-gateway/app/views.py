@@ -22,6 +22,9 @@ COMMENT_RATE_SERVICE_URL = os.environ.get("COMMENT_RATE_SERVICE_URL", "http://lo
 RECOMMENDER_SERVICE_URL = os.environ.get("RECOMMENDER_SERVICE_URL", "http://localhost:8011")
 AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://localhost:8012")
 CLOTHE_SERVICE_URL = os.environ.get("CLOTHE_SERVICE_URL", "http://localhost:8013")
+PRODUCT_CORE_SERVICE_URL = os.environ.get("PRODUCT_CORE_SERVICE_URL", "http://localhost:8014")
+INVENTORY_SERVICE_URL = os.environ.get("INVENTORY_SERVICE_URL", "http://localhost:8015")
+ELECTRONICS_SERVICE_URL = os.environ.get("ELECTRONICS_SERVICE_URL", "http://localhost:8017")
 
 
 # ── HELPERS ──────────────────────────────────────────────────
@@ -1629,3 +1632,413 @@ def store_clothe_detail(request, clothe_id):
     customer = _get_store_customer(request)
     cart_count = _get_cart_count(customer["id"], request) if customer else 0
     return render(request, "store_clothe_detail.html", {"clothe": clothe, "customer": customer, "cart_count": cart_count})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# API VIEWS FOR NEW SERVICES
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── PRODUCT CORE SERVICE APIs ─────────────────────────────────────────────────
+
+def api_products(request):
+    """GET: List products, POST: Create product"""
+    headers = _get_auth_headers(request)
+    
+    if request.method == "GET":
+        try:
+            params = request.GET.dict()
+            r = requests.get(f"{PRODUCT_CORE_SERVICE_URL}/products/", params=params, timeout=5, headers=headers)
+            return JsonResponse(r.json(), safe=False, status=r.status_code)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    
+    elif request.method == "POST":
+        import json
+        try:
+            data = json.loads(request.body)
+            r = requests.post(f"{PRODUCT_CORE_SERVICE_URL}/products/", json=data, timeout=5, headers=headers)
+            return JsonResponse(r.json(), safe=False, status=r.status_code)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+def api_product_detail(request, product_uuid):
+    """GET/PUT/DELETE product by UUID"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            r = requests.get(f"{PRODUCT_CORE_SERVICE_URL}/products/{product_uuid}/", timeout=5, headers=headers)
+        elif request.method == "PUT":
+            data = json.loads(request.body)
+            r = requests.put(f"{PRODUCT_CORE_SERVICE_URL}/products/{product_uuid}/", json=data, timeout=5, headers=headers)
+        elif request.method == "DELETE":
+            r = requests.delete(f"{PRODUCT_CORE_SERVICE_URL}/products/{product_uuid}/", timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        if r.status_code == 204:
+            return JsonResponse({"status": "deleted"}, status=204)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_product_types(request):
+    """GET: List product types, POST: Create product type"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            r = requests.get(f"{PRODUCT_CORE_SERVICE_URL}/product-types/", timeout=5, headers=headers)
+        elif request.method == "POST":
+            data = json.loads(request.body)
+            r = requests.post(f"{PRODUCT_CORE_SERVICE_URL}/product-types/", json=data, timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_products_by_type(request, type_code):
+    """List products by type"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        params = request.GET.dict()
+        r = requests.get(f"{PRODUCT_CORE_SERVICE_URL}/products/type/{type_code}/", params=params, timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── INVENTORY SERVICE APIs ────────────────────────────────────────────────────
+
+def api_variants(request):
+    """GET: List variants, POST: Create variant"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            params = request.GET.dict()
+            r = requests.get(f"{INVENTORY_SERVICE_URL}/variants/", params=params, timeout=5, headers=headers)
+        elif request.method == "POST":
+            data = json.loads(request.body)
+            r = requests.post(f"{INVENTORY_SERVICE_URL}/variants/", json=data, timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_variant_detail(request, sku):
+    """GET variant by SKU"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        r = requests.get(f"{INVENTORY_SERVICE_URL}/variants/{sku}/", timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_variants_by_product(request, product_uuid):
+    """Get variants for a product"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        r = requests.get(f"{INVENTORY_SERVICE_URL}/variants/product/{product_uuid}/", timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_stock(request):
+    """GET: List stock levels"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        params = request.GET.dict()
+        r = requests.get(f"{INVENTORY_SERVICE_URL}/stock/", params=params, timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_stock_check(request):
+    """POST: Check stock availability"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        data = json.loads(request.body)
+        r = requests.post(f"{INVENTORY_SERVICE_URL}/stock/check/", json=data, timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_warehouses(request):
+    """GET: List warehouses, POST: Create warehouse"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            r = requests.get(f"{INVENTORY_SERVICE_URL}/warehouses/", timeout=5, headers=headers)
+        elif request.method == "POST":
+            data = json.loads(request.body)
+            r = requests.post(f"{INVENTORY_SERVICE_URL}/warehouses/", json=data, timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── ELECTRONICS SERVICE APIs ──────────────────────────────────────────────────
+
+def api_electronics(request):
+    """GET: List electronics, POST: Create electronic"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            params = request.GET.dict()
+            r = requests.get(f"{ELECTRONICS_SERVICE_URL}/electronics/", params=params, timeout=5, headers=headers)
+        elif request.method == "POST":
+            data = json.loads(request.body)
+            r = requests.post(f"{ELECTRONICS_SERVICE_URL}/electronics/", json=data, timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_electronic_detail(request, electronic_id):
+    """GET/PATCH electronic by ID"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            r = requests.get(f"{ELECTRONICS_SERVICE_URL}/electronics/{electronic_id}/", timeout=5, headers=headers)
+        elif request.method == "PATCH":
+            data = json.loads(request.body)
+            r = requests.patch(f"{ELECTRONICS_SERVICE_URL}/electronics/{electronic_id}/", json=data, timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── CATEGORY SERVICE APIs (Extended) ──────────────────────────────────────────
+
+def api_categories(request):
+    """GET: List categories, POST: Create category"""
+    headers = _get_auth_headers(request)
+    import json
+    
+    try:
+        if request.method == "GET":
+            params = request.GET.dict()
+            r = requests.get(f"{CATALOG_SERVICE_URL}/categories/", params=params, timeout=5, headers=headers)
+        elif request.method == "POST":
+            data = json.loads(request.body)
+            r = requests.post(f"{CATALOG_SERVICE_URL}/categories/", json=data, timeout=5, headers=headers)
+        else:
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_category_tree(request):
+    """GET: Category tree"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        r = requests.get(f"{CATALOG_SERVICE_URL}/categories/tree/", timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_category_products(request, category_id):
+    """GET: Products in a category"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        params = request.GET.dict()
+        r = requests.get(f"{CATALOG_SERVICE_URL}/categories/{category_id}/products/", params=params, timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── STORE VIEWS FOR NEW PRODUCTS ──────────────────────────────────────────────
+
+def store_products(request):
+    """Store page showing all products"""
+    products = []
+    categories = []
+    
+    try:
+        # Get products from product-core
+        params = request.GET.dict()
+        r = requests.get(f"{PRODUCT_CORE_SERVICE_URL}/products/", params=params, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            products = data.get("results", data) if isinstance(data, dict) else data
+    except Exception:
+        pass
+    
+    try:
+        # Get categories
+        r = requests.get(f"{CATALOG_SERVICE_URL}/categories/tree/", timeout=3)
+        if r.status_code == 200:
+            categories = r.json()
+    except Exception:
+        pass
+    
+    customer = _get_store_customer(request)
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
+    
+    return render(request, "store_products.html", {
+        "products": products,
+        "categories": categories,
+        "customer": customer,
+        "cart_count": cart_count,
+        "filters": request.GET.dict()
+    })
+
+
+def store_product_detail(request, product_uuid):
+    """Store page showing product detail"""
+    product = None
+    variants = []
+    reviews = []
+    
+    try:
+        r = requests.get(f"{PRODUCT_CORE_SERVICE_URL}/products/{product_uuid}/", timeout=5)
+        if r.status_code == 200:
+            product = r.json()
+    except Exception:
+        pass
+    
+    if product:
+        # Get variants
+        try:
+            r = requests.get(f"{INVENTORY_SERVICE_URL}/variants/product/{product_uuid}/", timeout=3)
+            if r.status_code == 200:
+                variants = r.json()
+        except Exception:
+            pass
+        
+        # Get reviews
+        try:
+            r = requests.get(f"{COMMENT_RATE_SERVICE_URL}/reviews/product/{product_uuid}/", timeout=3)
+            if r.status_code == 200:
+                reviews = r.json()
+        except Exception:
+            pass
+    
+    customer = _get_store_customer(request)
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
+    
+    return render(request, "store_product_detail.html", {
+        "product": product,
+        "variants": variants,
+        "reviews": reviews,
+        "customer": customer,
+        "cart_count": cart_count
+    })
+
+
+def store_electronics(request):
+    """Store page showing electronics"""
+    electronics = []
+    
+    try:
+        params = request.GET.dict()
+        r = requests.get(f"{ELECTRONICS_SERVICE_URL}/electronics/", params=params, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            electronics = data.get("results", data) if isinstance(data, dict) else data
+    except Exception:
+        pass
+    
+    customer = _get_store_customer(request)
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
+    
+    return render(request, "store_electronics.html", {
+        "electronics": electronics,
+        "customer": customer,
+        "cart_count": cart_count
+    })
+
+
+def store_electronic_detail(request, electronic_id):
+    """Store page showing electronic detail"""
+    electronic = None
+    
+    try:
+        r = requests.get(f"{ELECTRONICS_SERVICE_URL}/electronics/{electronic_id}/", timeout=5)
+        if r.status_code == 200:
+            electronic = r.json()
+    except Exception:
+        pass
+    
+    customer = _get_store_customer(request)
+    cart_count = _get_cart_count(customer["id"], request) if customer else 0
+    
+    return render(request, "store_electronic_detail.html", {
+        "electronic": electronic,
+        "customer": customer,
+        "cart_count": cart_count
+    })
+
+
+# ── SEARCH SERVICE APIs ───────────────────────────────────────────────────────
+
+SEARCH_SERVICE_URL = os.environ.get("SEARCH_SERVICE_URL", "http://localhost:8016")
+
+
+def api_search(request):
+    """Search products with full-text search and facets"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        params = request.GET.dict()
+        r = requests.get(f"{SEARCH_SERVICE_URL}/search/", params=params, timeout=10, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_search_suggest(request):
+    """Get search suggestions/autocomplete"""
+    headers = _get_auth_headers(request)
+    
+    try:
+        params = request.GET.dict()
+        r = requests.get(f"{SEARCH_SERVICE_URL}/search/suggest/", params=params, timeout=5, headers=headers)
+        return JsonResponse(r.json(), safe=False, status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
