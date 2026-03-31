@@ -287,6 +287,73 @@ services:
       postgres-db:
         condition: service_healthy
 
+  product-core-service:
+    build: ./product-core-service
+    ports:
+      - "8014:8000"
+    command: sh -c "python manage.py makemigrations app && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./product-core-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=product_core_db
+      - DB_USER=bookstore_user
+      - DB_PASSWORD=bookstore_pass
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - BOOK_SERVICE_URL=http://book-service:8000
+      - CLOTHE_SERVICE_URL=http://clothe-service:8000
+      - CATEGORY_SERVICE_URL=http://catalog-service:8000
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+  inventory-service:
+    build: ./inventory-service
+    ports:
+      - "8015:8000"
+    command: sh -c "python manage.py makemigrations app && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./inventory-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=inventory_db
+      - DB_USER=bookstore_user
+      - DB_PASSWORD=bookstore_pass
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - PRODUCT_CORE_SERVICE_URL=http://product-core-service:8000
+      - ORDER_SERVICE_URL=http://order-service:8000
+      - RABBITMQ_HOST=rabbitmq
+      - RESERVATION_EXPIRY_MINUTES=30
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+  electronics-service:
+    build: ./electronics-service
+    ports:
+      - "8017:8000"
+    command: sh -c "python manage.py makemigrations app && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./electronics-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=electronics_db
+      - DB_USER=bookstore_user
+      - DB_PASSWORD=bookstore_pass
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - PRODUCT_CORE_SERVICE_URL=http://product-core-service:8000
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
   api-gateway:
     build: ./api-gateway
     ports:
@@ -315,6 +382,9 @@ services:
       - COMMENT_RATE_SERVICE_URL=http://comment-rate-service:8000
       - RECOMMENDER_SERVICE_URL=http://recommender-ai-service:8000
       - CLOTHE_SERVICE_URL=http://clothe-service:8000
+      - PRODUCT_CORE_SERVICE_URL=http://product-core-service:8000
+      - INVENTORY_SERVICE_URL=http://inventory-service:8000
+      - ELECTRONICS_SERVICE_URL=http://electronics-service:8000
       - JWT_SECRET_KEY=bookstore-jwt-secret
       - JWT_ISSUER=bookstore-auth-service
       - JWT_AUDIENCE=bookstore-clients

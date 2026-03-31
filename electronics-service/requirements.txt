@@ -1,0 +1,6 @@
+django
+djangorestframework
+requests
+psycopg2-binary
+django-filter
+pika
